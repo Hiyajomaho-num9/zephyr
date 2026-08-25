@@ -34,7 +34,11 @@ LOG_MODULE_REGISTER(hci_wba);
 
 #define DT_DRV_COMPAT st_hci_stm32wba
 
-static K_SEM_DEFINE(hci_sem, 1, 1);
+/* Serializes the accesses to the controller. It is a mutex, and not a
+ * semaphore, because the controller can indicate an event from within
+ * BleStack_Request(), i.e. from the thread that is already holding it.
+ */
+static K_MUTEX_DEFINE(hci_lock);
 
 #if defined(CONFIG_BT_HCI_SETUP)
 /* Bluetooth LE public STM32WBA default device address (if udn not available) */
@@ -65,6 +69,7 @@ struct aci_reset {
 
 static uint8_t bt_hci_state = BT_HCI_STATE_DEINIT;
 extern uint8_t ll_state_busy;
+extern bool standby_entered;
 
 static bool is_hci_event_discardable(const uint8_t *evt_data)
 {
@@ -269,6 +274,7 @@ uint8_t BLECB_Indication(const uint8_t *data, uint16_t length,
 			 const uint8_t *ext_data, uint16_t ext_length)
 {
 	const struct device *dev = DEVICE_DT_GET(DT_DRV_INST(0));
+	__maybe_unused int unlock_err;
 	int ret = 0;
 	int err;
 
@@ -277,12 +283,17 @@ uint8_t BLECB_Indication(const uint8_t *data, uint16_t length,
 		LOG_DBG("ext_length: %d", ext_length);
 	}
 
-	k_sem_take(&hci_sem, K_FOREVER);
+	err = k_mutex_lock(&hci_lock, K_FOREVER);
+	if (err != 0) {
+		LOG_ERR("Failed to lock the controller (%d)", err);
+		return 1;
+	}
 
 	err = receive_data(dev, data, (size_t)length,
 			   ext_data, (size_t)ext_length);
 
-	k_sem_give(&hci_sem);
+	unlock_err = k_mutex_unlock(&hci_lock);
+	__ASSERT_NO_MSG(unlock_err == 0);
 
 	HostStack_Process();
 
@@ -299,9 +310,14 @@ static int bt_hci_stm32wba_send(const struct device *dev, struct net_buf *buf)
 	struct net_buf *evt_buf = NULL;
 	uint16_t event_length;
 	uint8_t *data;
+	__maybe_unused int unlock_err;
 	int err = 0;
 
-	k_sem_take(&hci_sem, K_FOREVER);
+	err = k_mutex_lock(&hci_lock, K_FOREVER);
+	if (err != 0) {
+		LOG_ERR("Failed to lock the controller (%d)", err);
+		return err;
+	}
 
 	if (buf->data[0] == BT_HCI_H4_CMD) {
 		/*
@@ -350,7 +366,8 @@ static int bt_hci_stm32wba_send(const struct device *dev, struct net_buf *buf)
 	}
 
 done:
-	k_sem_give(&hci_sem);
+	unlock_err = k_mutex_unlock(&hci_lock);
+	__ASSERT_NO_MSG(unlock_err == 0);
 
 	net_buf_unref(buf);
 
@@ -423,7 +440,7 @@ static int bt_hci_stm32wba_open(const struct device *dev)
 #endif
 	}
 
-	link_layer_register_isr(false);
+	link_layer_register_isr();
 
 	ret = bt_ble_ctlr_init();
 
@@ -575,9 +592,9 @@ static int radio_pm_action(const struct device *dev, enum pm_device_action actio
 		LL_AHB5_GRP1_EnableClock(LL_AHB5_GRP1_PERIPH_RADIO);
 #if defined(CONFIG_PM_S2RAM)
 		if (ll_sys_dp_slp_get_state() == LL_SYS_DP_SLP_ENABLED) {
-			if (LL_PWR_IsActiveFlag_SB() == 1U) {
+			if (standby_entered) {
 				/* Restore NVIC configuration for radio */
-				link_layer_register_isr(true);
+				link_layer_register_isr();
 				ll_sys_dp_slp_exit();
 			}
 		}

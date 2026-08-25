@@ -6,6 +6,7 @@
 
 #include <zephyr/ztest.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/devicetree/counter-capture.h>
 #include <zephyr/devicetree/nvmem.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
@@ -69,6 +70,9 @@
 #define TEST_PWM_CTLR_1 DT_NODELABEL(test_pwm1)
 #define TEST_PWM_CTLR_2 DT_NODELABEL(test_pwm2)
 
+#define TEST_COUNTER_CTLR_1 DT_NODELABEL(test_counter1)
+#define TEST_COUNTER_CTLR_2 DT_NODELABEL(test_counter2)
+
 #define TEST_CAN_CTRL_0 DT_NODELABEL(test_can0)
 #define TEST_CAN_CTRL_1 DT_NODELABEL(test_can1)
 #define TEST_CAN_CTRL_2 DT_NODELABEL(test_can2)
@@ -102,6 +106,9 @@
 #define TEST_RANGES_PCIE  DT_NODELABEL(test_ranges_pcie)
 #define TEST_RANGES_OTHER DT_NODELABEL(test_ranges_other)
 #define TEST_RANGES_EMPTY DT_NODELABEL(test_ranges_empty)
+
+#define TEST_DMA_RANGES_PCIE  DT_NODELABEL(test_dma_ranges_pcie)
+#define TEST_DMA_RANGES_OTHER DT_NODELABEL(test_dma_ranges_other)
 
 #define TEST_REGS_TEST_NODE   DT_NODELABEL(test_regs_test_node)
 #define TEST_REGS_OTHER       DT_NODELABEL(test_regs_other)
@@ -1804,6 +1811,113 @@ ZTEST(devicetree_api, test_pwms)
 }
 
 #undef DT_DRV_COMPAT
+#define DT_DRV_COMPAT vnd_phandle_holder
+ZTEST(devicetree_api, test_counter_captures)
+{
+	/* DT_COUNTER_CAPTURES_CTLR_BY_IDX */
+	zassert_true(DT_SAME_NODE(DT_COUNTER_CAPTURES_CTLR_BY_IDX(TEST_PH, counter_captures, 0),
+				  TEST_COUNTER_CTLR_1), "");
+	zassert_true(DT_SAME_NODE(DT_COUNTER_CAPTURES_CTLR_BY_IDX(TEST_PH, counter_captures, 1),
+				  TEST_COUNTER_CTLR_2), "");
+
+	/* DT_COUNTER_CAPTURES_CTLR_BY_NAME */
+	zassert_true(
+		DT_SAME_NODE(DT_COUNTER_CAPTURES_CTLR_BY_NAME(TEST_PH, counter_captures, alpha),
+			     TEST_COUNTER_CTLR_1), "");
+	zassert_true(
+		DT_SAME_NODE(DT_COUNTER_CAPTURES_CTLR_BY_NAME(TEST_PH, counter_captures, beta),
+			     TEST_COUNTER_CTLR_2), "");
+
+	/* DT_COUNTER_CAPTURES_CTLR */
+	zassert_true(DT_SAME_NODE(DT_COUNTER_CAPTURES_CTLR(TEST_PH, counter_captures),
+				  TEST_COUNTER_CTLR_1), "");
+
+	/* DT_COUNTER_CAPTURES_CELL_BY_IDX */
+	zassert_equal(DT_COUNTER_CAPTURES_CELL_BY_IDX(TEST_PH, counter_captures, 1, channel),
+		      7, "");
+	zassert_equal(DT_COUNTER_CAPTURES_CELL_BY_IDX(TEST_PH, counter_captures, 1, flags), 9, "");
+
+	/* DT_COUNTER_CAPTURES_CELL_BY_NAME */
+	zassert_equal(DT_COUNTER_CAPTURES_CELL_BY_NAME(TEST_PH, counter_captures, alpha, channel),
+		      2, "");
+	zassert_equal(DT_COUNTER_CAPTURES_CELL_BY_NAME(TEST_PH, counter_captures, alpha, flags),
+		      4, "");
+
+	/* DT_COUNTER_CAPTURES_CELL */
+	zassert_equal(DT_COUNTER_CAPTURES_CELL(TEST_PH, counter_captures, channel), 2, "");
+	zassert_equal(DT_COUNTER_CAPTURES_CELL(TEST_PH, counter_captures, flags), 4, "");
+
+	/* DT_COUNTER_CAPTURES_CHANNEL_BY_IDX */
+	zassert_equal(DT_COUNTER_CAPTURES_CHANNEL_BY_IDX(TEST_PH, counter_captures, 1), 7, "");
+
+	/* DT_COUNTER_CAPTURES_CHANNEL_BY_NAME */
+	zassert_equal(DT_COUNTER_CAPTURES_CHANNEL_BY_NAME(TEST_PH, counter_captures, beta), 7, "");
+
+	/* DT_COUNTER_CAPTURES_CHANNEL */
+	zassert_equal(DT_COUNTER_CAPTURES_CHANNEL(TEST_PH, counter_captures), 2, "");
+
+	/* DT_COUNTER_CAPTURES_FLAGS_BY_IDX */
+	zassert_equal(DT_COUNTER_CAPTURES_FLAGS_BY_IDX(TEST_PH, counter_captures, 1), 9, "");
+
+	/* DT_COUNTER_CAPTURES_FLAGS_BY_NAME */
+	zassert_equal(DT_COUNTER_CAPTURES_FLAGS_BY_NAME(TEST_PH, counter_captures, beta), 9, "");
+
+	/* DT_COUNTER_CAPTURES_FLAGS */
+	zassert_equal(DT_COUNTER_CAPTURES_FLAGS(TEST_PH, counter_captures), 4, "");
+
+	/* DT_INST */
+	zassert_equal(DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT), 1, "");
+
+	/* DT_INST_COUNTER_CAPTURES_CTLR_BY_IDX */
+	zassert_true(DT_SAME_NODE(DT_INST_COUNTER_CAPTURES_CTLR_BY_IDX(0, counter_captures, 0),
+				  TEST_COUNTER_CTLR_1), "");
+	zassert_true(DT_SAME_NODE(DT_INST_COUNTER_CAPTURES_CTLR_BY_IDX(0, counter_captures, 1),
+				  TEST_COUNTER_CTLR_2), "");
+
+	/* DT_INST_COUNTER_CAPTURES_CTLR_BY_NAME */
+	zassert_true(DT_SAME_NODE(DT_INST_COUNTER_CAPTURES_CTLR_BY_NAME(0, counter_captures, alpha),
+				  TEST_COUNTER_CTLR_1), "");
+	zassert_true(DT_SAME_NODE(DT_INST_COUNTER_CAPTURES_CTLR_BY_NAME(0, counter_captures, beta),
+				  TEST_COUNTER_CTLR_2), "");
+
+	/* DT_INST_COUNTER_CAPTURES_CTLR */
+	zassert_true(DT_SAME_NODE(DT_INST_COUNTER_CAPTURES_CTLR(0, counter_captures),
+				  TEST_COUNTER_CTLR_1), "");
+
+	/* DT_INST_COUNTER_CAPTURES_CELL_BY_IDX */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CELL_BY_IDX(0, counter_captures, 1, channel), 7, "");
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CELL_BY_IDX(0, counter_captures, 1, flags), 9, "");
+
+	/* DT_INST_COUNTER_CAPTURES_CELL_BY_NAME */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CELL_BY_NAME(0, counter_captures, beta, channel),
+		      7, "");
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CELL_BY_NAME(0, counter_captures, beta, flags),
+		      9, "");
+
+	/* DT_INST_COUNTER_CAPTURES_CELL */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CELL(0, counter_captures, channel), 2, "");
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CELL(0, counter_captures, flags), 4, "");
+
+	/* DT_INST_COUNTER_CAPTURES_CHANNEL_BY_IDX */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CHANNEL_BY_IDX(0, counter_captures, 1), 7, "");
+
+	/* DT_INST_COUNTER_CAPTURES_CHANNEL_BY_NAME */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CHANNEL_BY_NAME(0, counter_captures, beta), 7, "");
+
+	/* DT_INST_COUNTER_CAPTURES_CHANNEL */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_CHANNEL(0, counter_captures), 2, "");
+
+	/* DT_INST_COUNTER_CAPTURES_FLAGS_BY_IDX */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_FLAGS_BY_IDX(0, counter_captures, 1), 9, "");
+
+	/* DT_INST_COUNTER_CAPTURES_FLAGS_BY_NAME */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_FLAGS_BY_NAME(0, counter_captures, alpha), 4, "");
+
+	/* DT_INST_COUNTER_CAPTURES_FLAGS */
+	zassert_equal(DT_INST_COUNTER_CAPTURES_FLAGS(0, counter_captures), 4, "");
+}
+
+#undef DT_DRV_COMPAT
 #define DT_DRV_COMPAT vnd_can_controller
 ZTEST(devicetree_api, test_can)
 {
@@ -3018,6 +3132,93 @@ ZTEST(devicetree_api, test_ranges_empty)
 	DT_FOREACH_RANGE(TEST_RANGES_EMPTY, FAIL);
 
 #undef FAIL
+}
+
+#undef DT_DRV_COMPAT
+#define DT_DRV_COMPAT vnd_test_dma_ranges_pcie
+ZTEST(devicetree_api, test_dma_ranges_pcie)
+{
+#define CHILD_BUS_ADDR(node_id, idx)				\
+	DT_DMA_RANGES_CHILD_BUS_ADDRESS_BY_IDX(node_id, idx),
+#define PARENT_BUS_ADDR(node_id, idx)				\
+	DT_DMA_RANGES_PARENT_BUS_ADDRESS_BY_IDX(node_id, idx),
+#define LENGTH(node_id, idx) DT_DMA_RANGES_LENGTH_BY_IDX(node_id, idx),
+
+	unsigned int count = DT_NUM_DMA_RANGES(TEST_DMA_RANGES_PCIE);
+
+	const uint64_t dma_ranges_child_bus_addr[] = {
+		DT_FOREACH_DMA_RANGE(TEST_DMA_RANGES_PCIE, CHILD_BUS_ADDR)
+	};
+
+	const uint64_t dma_ranges_parent_bus_addr[] = {
+		DT_FOREACH_DMA_RANGE(TEST_DMA_RANGES_PCIE, PARENT_BUS_ADDR)
+	};
+
+	const uint64_t dma_ranges_length[] = {
+		DT_FOREACH_DMA_RANGE(TEST_DMA_RANGES_PCIE, LENGTH)
+	};
+
+	zassert_equal(count, 3, "");
+
+	zassert_equal(DT_DMA_RANGES_HAS_IDX(TEST_DMA_RANGES_PCIE, 0), 1, "");
+	zassert_equal(DT_DMA_RANGES_HAS_IDX(TEST_DMA_RANGES_PCIE, 1), 1, "");
+	zassert_equal(DT_DMA_RANGES_HAS_IDX(TEST_DMA_RANGES_PCIE, 2), 1, "");
+	zassert_equal(DT_DMA_RANGES_HAS_IDX(TEST_DMA_RANGES_PCIE, 3), 0, "");
+
+	zassert_equal(dma_ranges_child_bus_addr[0], 0, "");
+	zassert_equal(dma_ranges_child_bus_addr[1], 0x10000000, "");
+	zassert_equal(dma_ranges_child_bus_addr[2], 0x8000000000, "");
+	zassert_equal(dma_ranges_parent_bus_addr[0], 0x3eff0000, "");
+	zassert_equal(dma_ranges_parent_bus_addr[1], 0x10000000, "");
+	zassert_equal(dma_ranges_parent_bus_addr[2], 0x8000000000, "");
+	zassert_equal(dma_ranges_length[0], 0x10000, "");
+	zassert_equal(dma_ranges_length[1], 0x2eff0000, "");
+	zassert_equal(dma_ranges_length[2], 0x8000000000, "");
+
+#undef CHILD_BUS_ADDR
+#undef PARENT_BUS_ADDR
+#undef LENGTH
+}
+
+ZTEST(devicetree_api, test_dma_ranges_other)
+{
+#define CHILD_BUS_ADDR(node_id, idx) \
+	DT_DMA_RANGES_CHILD_BUS_ADDRESS_BY_IDX(node_id, idx),
+#define PARENT_BUS_ADDR(node_id, idx) \
+	DT_DMA_RANGES_PARENT_BUS_ADDRESS_BY_IDX(node_id, idx),
+#define LENGTH(node_id, idx) DT_DMA_RANGES_LENGTH_BY_IDX(node_id, idx),
+
+	unsigned int count = DT_NUM_DMA_RANGES(TEST_DMA_RANGES_OTHER);
+
+	const uint32_t dma_ranges_child_bus_addr[] = {
+		DT_FOREACH_DMA_RANGE(TEST_DMA_RANGES_OTHER, CHILD_BUS_ADDR)
+	};
+
+	const uint32_t dma_ranges_parent_bus_addr[] = {
+		DT_FOREACH_DMA_RANGE(TEST_DMA_RANGES_OTHER, PARENT_BUS_ADDR)
+	};
+
+	const uint32_t dma_ranges_length[] = {
+		DT_FOREACH_DMA_RANGE(TEST_DMA_RANGES_OTHER, LENGTH)
+	};
+
+	zassert_equal(count, 2, "");
+
+	zassert_equal(DT_DMA_RANGES_HAS_IDX(TEST_DMA_RANGES_OTHER, 0), 1, "");
+	zassert_equal(DT_DMA_RANGES_HAS_IDX(TEST_DMA_RANGES_OTHER, 1), 1, "");
+	zassert_equal(DT_DMA_RANGES_HAS_IDX(TEST_DMA_RANGES_OTHER, 2), 0, "");
+	zassert_equal(DT_DMA_RANGES_HAS_IDX(TEST_DMA_RANGES_OTHER, 3), 0, "");
+
+	zassert_equal(dma_ranges_child_bus_addr[0], 0, "");
+	zassert_equal(dma_ranges_child_bus_addr[1], 0x10000000, "");
+	zassert_equal(dma_ranges_parent_bus_addr[0], 0x3eff0000, "");
+	zassert_equal(dma_ranges_parent_bus_addr[1], 0x10000000, "");
+	zassert_equal(dma_ranges_length[0], 0x10000, "");
+	zassert_equal(dma_ranges_length[1], 0x2eff0000, "");
+
+#undef CHILD_BUS_ADDR
+#undef PARENT_BUS_ADDR
+#undef LENGTH
 }
 
 #undef DT_DRV_COMPAT

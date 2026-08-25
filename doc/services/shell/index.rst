@@ -499,7 +499,7 @@ Simple command handler implementation:
 		ARG_UNUSED(argc);
 		ARG_UNUSED(argv);
 
-		shell_fprintf(shell, SHELL_INFO, "Print info message\n");
+		shell_fprintf(sh, SHELL_INFO, "Print info message\n");
 
 		shell_print(sh, "Print simple text.");
 
@@ -911,6 +911,8 @@ This allows interactive use of the shell through JLinkRTTViewer, while the log
 is written to file.
 
 See `shell backends <backends_>`_ for details on how to enable RTT as a Shell backend.
+
+.. _shell_remote:
 
 Remote Shell
 ************

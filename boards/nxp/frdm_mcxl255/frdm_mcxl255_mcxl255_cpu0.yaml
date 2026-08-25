@@ -13,5 +13,9 @@ toolchain:
 supported:
   - uart
   - gpio
+  - spi
+  - i2c
   - rtc
+  - crc
+  - watchdog
 vendor: nxp

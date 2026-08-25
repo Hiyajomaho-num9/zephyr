@@ -58,17 +58,6 @@ if(NOT DEFINED BOARD_DEFCONFIG)
 endif()
 
 if(DEFINED BOARD_REVISION)
-  zephyr_build_string(config_board_string
-                      BOARD ${BOARD}
-                      BOARD_QUALIFIERS ${BOARD_QUALIFIERS}
-                      BOARD_REVISION ${BOARD_REVISION}
-  )
-  set(board_rev_file ${config_board_string})
-  if(EXISTS ${BOARD_DIR}/${board_rev_file}.conf)
-    message(DEPRECATION "Use of '${board_rev_file}.conf' is deprecated, please switch to '${board_rev_file}_defconfig'")
-    set_ifndef(BOARD_REVISION_CONFIG ${BOARD_DIR}/${board_rev_file}.conf)
-  endif()
-
   # Generate boolean board revision kconfig option
   zephyr_string(SANITIZE TOUPPER BOARD_REVISION_GEN_CONFIG_VAR "BOARD_REVISION_${BOARD_REVISION}")
 
@@ -345,9 +334,14 @@ if(KCONFIG_VARIANT_SOURCE)
 endif()
 
 # Calculate a checksum of merge_config_files to determine if we need
-# to re-generate .config
+# to re-generate .config. DTS is also checksummed since it can affect
+# configurations via $(dt...) functions.
+set(config_checksum_files ${merge_config_files})
+if(DEFINED ZEPHYR_DTS)
+  set(config_checksum_files ${config_checksum_files};${ZEPHYR_DTS})
+endif()
 set(merge_config_files_checksum "")
-foreach(f ${merge_config_files})
+foreach(f ${config_checksum_files})
   file(MD5 ${f} checksum)
   set(merge_config_files_checksum "${merge_config_files_checksum}${checksum}")
 endforeach()

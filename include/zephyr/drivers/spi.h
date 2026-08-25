@@ -190,6 +190,10 @@ extern "C" {
  * is the spi_config pointer given to the transaction API, so this same
  * config should be re-used to do another transaction or release the lock.
  *
+ * For chaining asynchronous transactions, use the RTIO submit path
+ * (@ref spi_iodev_submit) rather than re-entering
+ * transceive from the completion callback, which may run in ISR context.
+ *
  * See @ref spi_release for how to release the  lock.
  */
 #define SPI_LOCK_ON		BIT(13)
@@ -334,18 +338,13 @@ struct spi_cs_control {
 	    DT_PROP_OR(node_id, spi_cs_hold_delay_ns, 0))
 
 
-#define SPI_CS_CONTROL_INIT_GPIO(node_id, ...)						\
+#define SPI_CS_CONTROL_INIT_GPIO(node_id)						\
 	.gpio = SPI_CS_GPIOS_DT_SPEC_GET(node_id),					\
-	.delay = COND_CODE_1(IS_EMPTY(__VA_ARGS__),					\
-			(DIV_ROUND_UP(SPI_CS_CONTROL_MAX_DELAY(node_id), 1000)),	\
-			(__VA_ARGS__)),
+	.delay = DIV_ROUND_UP(SPI_CS_CONTROL_MAX_DELAY(node_id), 1000),
 
 #define SPI_CS_CONTROL_INIT_NATIVE(node_id)						\
 	.setup_ns = DT_PROP_OR(node_id, spi_cs_setup_delay_ns, 0),			\
 	.hold_ns = DT_PROP_OR(node_id, spi_cs_hold_delay_ns, 0),
-
-#define SPI_DEPRECATE_DELAY_WARN							\
-	__WARN("Delay parameter in SPI DT macros is deprecated, use DT prop instead")
 /** @endcond */
 
 /**
@@ -378,7 +377,9 @@ struct spi_cs_control {
  * @code{.c}
  *     struct spi_cs_control ctrl = {
  *             .gpio = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(spidev)),
- *             .delay = DT_PROP(node_id, cs_delay_ns) / 1000,
+ *             .delay = DIV_ROUND_UP(MAX(DT_PROP_OR(node_id, spi_cs_setup_delay_ns, 0),
+ *                                       DT_PROP_OR(node_id, spi_cs_hold_delay_ns, 0)),
+ *                                   1000),
  *             .cs_is_gpio = true,
  *     };
  * @endcode
@@ -390,11 +391,10 @@ struct spi_cs_control {
  *
  * @return a pointer to the @p spi_cs_control structure
  */
-#define SPI_CS_CONTROL_INIT(node_id, ...)					\
+#define SPI_CS_CONTROL_INIT(node_id)						\
 {										\
-	COND_CODE_0(IS_EMPTY(__VA_ARGS__), (SPI_DEPRECATE_DELAY_WARN), ())	\
 	COND_CODE_1(DT_SPI_DEV_HAS_CS_GPIOS(node_id),				\
-			(SPI_CS_CONTROL_INIT_GPIO(node_id, __VA_ARGS__)),	\
+			(SPI_CS_CONTROL_INIT_GPIO(node_id)),			\
 			(SPI_CS_CONTROL_INIT_NATIVE(node_id)))			\
 	.cs_is_gpio = DT_SPI_DEV_HAS_CS_GPIOS(node_id),				\
 }
@@ -403,9 +403,9 @@ struct spi_cs_control {
  * @brief Get a pointer to a @p spi_cs_control from a devicetree node
  *
  * This is equivalent to
- * <tt>SPI_CS_CONTROL_INIT(DT_DRV_INST(inst), delay)</tt>.
+ * <tt>SPI_CS_CONTROL_INIT(DT_DRV_INST(inst))</tt>.
  *
- * Therefore, @p DT_DRV_COMPAT must already be defined before using
+ * Therefore, @c DT_DRV_COMPAT must already be defined before using
  * this macro.
  *
  * @param inst Devicetree node instance number
@@ -505,7 +505,7 @@ static inline uint16_t spi_get_word_delay(const struct spi_config *cfg)
  *                struct spi_config to create an initializer for
  * @param operation_ the desired @p operation field in the struct spi_config
  */
-#define SPI_CONFIG_DT(node_id, operation_, ...)				\
+#define SPI_CONFIG_DT(node_id, operation_)				\
 	{								\
 		.frequency = DT_PROP(node_id, spi_max_frequency),	\
 		.operation = (operation_) |				\
@@ -517,7 +517,7 @@ static inline uint16_t spi_get_word_delay(const struct spi_config *cfg)
 			COND_CODE_1(DT_PROP(node_id, spi_lsb_first), SPI_TRANSFER_LSB, (0)) |	\
 			COND_CODE_1(DT_PROP(node_id, spi_cs_high), SPI_CS_ACTIVE_HIGH, (0)),	\
 		.slave = DT_REG_ADDR(node_id),				\
-		.cs = SPI_CS_CONTROL_INIT(node_id, __VA_ARGS__),	\
+		.cs = SPI_CS_CONTROL_INIT(node_id),			\
 		.word_delay = DT_PROP(node_id, spi_interframe_delay_ns),\
 	}
 
@@ -530,8 +530,8 @@ static inline uint16_t spi_get_word_delay(const struct spi_config *cfg)
  * @param inst Devicetree instance number
  * @param operation_ the desired @p operation field in the struct spi_config
  */
-#define SPI_CONFIG_DT_INST(inst, operation_, ...)		\
-	SPI_CONFIG_DT(DT_DRV_INST(inst), operation_, __VA_ARGS__)
+#define SPI_CONFIG_DT_INST(inst, operation_)			\
+	SPI_CONFIG_DT(DT_DRV_INST(inst), operation_)
 
 /**
  * @brief Complete SPI DT information
@@ -550,7 +550,7 @@ struct spi_dt_spec {
  * spi_dt_spec</tt> by reading the relevant bus, frequency, slave, and cs
  * data from the devicetree.
  *
- * @important Multiple fields are automatically constructed by this macro
+ * @note Multiple fields are automatically constructed by this macro
  * which must be checked before use. @ref spi_is_ready_dt performs the required
  * @ref device_is_ready checks.
  *
@@ -558,10 +558,10 @@ struct spi_dt_spec {
  *                struct spi_dt_spec to create an initializer for
  * @param operation_ the desired @p operation field in the struct spi_config
  */
-#define SPI_DT_SPEC_GET(node_id, operation_, ...)				\
+#define SPI_DT_SPEC_GET(node_id, operation_)					\
 	{									\
 		.bus = DEVICE_DT_GET(DT_BUS(node_id)),				\
-		.config = SPI_CONFIG_DT(node_id, operation_, __VA_ARGS__),	\
+		.config = SPI_CONFIG_DT(node_id, operation_),			\
 	}
 
 /**
@@ -573,8 +573,8 @@ struct spi_dt_spec {
  * @param inst Devicetree instance number
  * @param operation_ the desired @p operation field in the struct spi_config
  */
-#define SPI_DT_SPEC_INST_GET(inst, operation_, ...) \
-	SPI_DT_SPEC_GET(DT_DRV_INST(inst), operation_, __VA_ARGS__)
+#define SPI_DT_SPEC_INST_GET(inst, operation_) \
+	SPI_DT_SPEC_GET(DT_DRV_INST(inst), operation_)
 
 /**
  * @brief Value that will never compare true with any valid overrun character
@@ -836,7 +836,7 @@ static inline void spi_transceive_stats(const struct device *dev, int error,
 				    level, prio, api, __VA_ARGS__)
 
 /**
- * @brief Like SPI_DEVICE_DT_DEINIT_DEFINE(), but uses an instance of a `DT_DRV_COMPAT`
+ * @brief Like SPI_DEVICE_DT_DEINIT_DEFINE(), but uses an instance of a @c DT_DRV_COMPAT
  * compatible instead of a node identifier.
  *
  * @param inst Instance number. The `node_id` argument to SPI_DEVICE_DT_DEINIT_DEFINE() is
@@ -847,7 +847,7 @@ static inline void spi_transceive_stats(const struct device *dev, int error,
 	SPI_DEVICE_DT_DEINIT_DEFINE(DT_DRV_INST(inst), __VA_ARGS__)
 
 /**
- * @brief Like SPI_DEVICE_DT_DEFINE(), but uses an instance of a `DT_DRV_COMPAT`
+ * @brief Like SPI_DEVICE_DT_DEFINE(), but uses an instance of a @c DT_DRV_COMPAT
  * compatible instead of a node identifier.
  *
  * @param inst Instance number. The `node_id` argument to SPI_DEVICE_DT_DEFINE() is
@@ -1000,13 +1000,13 @@ static inline bool spi_is_ready_dt(const struct spi_dt_spec *spec)
  *
  * @note This function is synchronous.
  *
- * @note In master mode, the chip select line will remain asserted (active) for
+ * @note In controller mode, the chip select line will remain asserted (active) for
  *       the entire duration of the transfer of all buffers in the provided buf sets.
  *       Only after all buffers have been transferred will CS be deasserted.
  *
- * @note In peripheral mode, data transfer happens when the master asserts CS and
- *       provides the clock. The function will wait for the master to complete
- *       the transfer before returning. The CS is controlled by master
+ * @note In peripheral mode, data transfer happens when the controller asserts CS and
+ *       provides the clock. The function will wait for the controller to complete
+ *       the transfer before returning. The CS is controlled by the controller
  *       and therefore may not be continuously asserted for the whole transfer.
  *
  * @param dev Pointer to the device structure for the driver instance
@@ -1018,12 +1018,11 @@ static inline bool spi_is_ready_dt(const struct spi_dt_spec *spec)
  * @param rx_bufs Buffer array where data to be read will be written to,
  *        or NULL if none.
  *
- * @retval frames Positive number of frames received in slave mode.
- * @retval 0 If successful in master mode.
- * @retval -ENOTSUP means some part of the spi config is not supported either by the
+ * @return Number of frames received in peripheral mode, 0 on success in
+ *         controller mode, negative errno value on failure.
+ * @retval -ENOTSUP The spi config is not supported either by the
  *	   device hardware or the driver software.
- * @retval -EINVAL means that some parameter of the spi_config is invalid.
- * @retval -errno Negative errno code on failure.
+ * @retval -EINVAL Some parameter of the spi_config is invalid.
  */
 __syscall int spi_transceive(const struct device *dev,
 			     const struct spi_config *config,
@@ -1077,12 +1076,11 @@ static inline int spi_transceive_dt(const struct spi_dt_spec *spec,
  *        previous operations.
  * @param rx_bufs Buffer array where data to be read will be written to.
  *
- * @retval frames Positive number of frames received in slave mode.
- * @retval 0 If successful.
- * @retval -ENOTSUP means some part of the spi config is not supported either by the
+ * @return Number of frames received in peripheral mode, 0 on success in
+ *         controller mode, negative errno value on failure.
+ * @retval -ENOTSUP The spi config is not supported either by the
  *	   device hardware or the driver software.
- * @retval -EINVAL means that some parameter of the spi_config is invalid.
- * @retval -errno Negative errno code on failure.
+ * @retval -EINVAL Some parameter of the spi_config is invalid.
  */
 static inline int spi_read(const struct device *dev,
 			   const struct spi_config *config,
@@ -1122,11 +1120,10 @@ static inline int spi_read_dt(const struct spi_dt_spec *spec,
  *        previous operations.
  * @param tx_bufs Buffer array where data to be sent originates from.
  *
- * @retval 0 If successful.
- * @retval -ENOTSUP means some part of the spi config is not supported either by the
+ * @return 0 on success, negative errno value on failure.
+ * @retval -ENOTSUP The spi config is not supported either by the
  *	   device hardware or the driver software.
- * @retval -EINVAL means that some parameter of the spi_config is invalid.
- * @retval -errno Negative errno code on failure.
+ * @retval -EINVAL Some parameter of the spi_config is invalid.
  */
 static inline int spi_write(const struct device *dev,
 			    const struct spi_config *config,
@@ -1189,12 +1186,11 @@ static inline int spi_write_dt(const struct spi_dt_spec *spec,
  *        successfully or not).
  * @param userdata Userdata passed to callback
  *
- * @retval frames Positive number of frames received in slave mode.
- * @retval 0 If successful in master mode.
- * @retval -ENOTSUP means some part of the spi config is not supported either by the
+ * @return Number of frames received in peripheral mode, 0 on success in
+ *         controller mode, negative errno value on failure.
+ * @retval -ENOTSUP The spi config is not supported either by the
  *	   device hardware or the driver software.
- * @retval -EINVAL means that some parameter of the spi_config is invalid.
- * @retval -errno Negative errno code on failure.
+ * @retval -EINVAL Some parameter of the spi_config is invalid.
  */
 static inline int spi_transceive_cb(const struct device *dev,
 				    const struct spi_config *config,
@@ -1221,7 +1217,7 @@ void z_spi_transfer_signal_cb(const struct device *dev, int result, void *userda
  * @note The chip select behavior as described by @ref spi_transceive and
  *       the function of controller/peripheral modes is the same.
  *
- * @kconfig_dep{CONFIG_SPI_ASYNC, CONFIG_POLL}
+ * @kconfig_dep{CONFIG_SPI_ASYNC,CONFIG_POLL}
  *
  * @param dev Pointer to the device structure for the driver instance
  * @param config Pointer to a valid spi_config structure instance.
@@ -1236,12 +1232,11 @@ void z_spi_transfer_signal_cb(const struct device *dev, int result, void *userda
  *        notify the end of the transaction, and whether it went
  *        successfully or not).
  *
- * @retval frames Positive number of frames received in slave mode.
- * @retval 0 If successful in master mode.
- * @retval -ENOTSUP means some part of the spi config is not supported either by the
+ * @return Number of frames received in peripheral mode, 0 on success in
+ *         controller mode, negative errno value on failure.
+ * @retval -ENOTSUP The spi config is not supported either by the
  *	   device hardware or the driver software.
- * @retval -EINVAL means that some parameter of the spi_config is invalid.
- * @retval -errno Negative errno code on failure.
+ * @retval -EINVAL Some parameter of the spi_config is invalid.
  */
 static inline int spi_transceive_signal(const struct device *dev,
 				       const struct spi_config *config,
@@ -1261,7 +1256,7 @@ static inline int spi_transceive_signal(const struct device *dev,
  *
  * @note This function is a helper function calling spi_transceive_signal.
  *
- * @kconfig_dep{CONFIG_SPI_ASYNC, CONFIG_POLL}
+ * @kconfig_dep{CONFIG_SPI_ASYNC,CONFIG_POLL}
  *
  * @param dev Pointer to the device structure for the driver instance
  * @param config Pointer to a valid spi_config structure instance.
@@ -1273,12 +1268,11 @@ static inline int spi_transceive_signal(const struct device *dev,
  *        notify the end of the transaction, and whether it went
  *        successfully or not).
  *
- * @retval frames Positive number of frames received in slave mode.
- * @retval 0 If successful
- * @retval -ENOTSUP means some part of the spi config is not supported either by the
+ * @return Number of frames received in peripheral mode, 0 on success in
+ *         controller mode, negative errno value on failure.
+ * @retval -ENOTSUP The spi config is not supported either by the
  *	   device hardware or the driver software.
- * @retval -EINVAL means that some parameter of the spi_config is invalid.
- * @retval -errno Negative errno code on failure.
+ * @retval -EINVAL Some parameter of the spi_config is invalid.
  */
 static inline int spi_read_signal(const struct device *dev,
 				 const struct spi_config *config,
@@ -1295,7 +1289,7 @@ static inline int spi_read_signal(const struct device *dev,
  *
  * @note This function is a helper function calling spi_transceive_signal.
  *
- * @kconfig_dep{CONFIG_SPI_ASYNC, CONFIG_POLL}
+ * @kconfig_dep{CONFIG_SPI_ASYNC,CONFIG_POLL}
  *
  * @param dev Pointer to the device structure for the driver instance
  * @param config Pointer to a valid spi_config structure instance.
@@ -1307,11 +1301,10 @@ static inline int spi_read_signal(const struct device *dev,
  *        notify the end of the transaction, and whether it went
  *        successfully or not).
  *
- * @retval 0 If successful.
- * @retval -ENOTSUP means some part of the spi config is not supported either by the
+ * @return 0 on success, negative errno value on failure.
+ * @retval -ENOTSUP The spi config is not supported either by the
  *	   device hardware or the driver software.
- * @retval -EINVAL means that some parameter of the spi_config is invalid.
- * @retval -errno Negative errno code on failure.
+ * @retval -EINVAL Some parameter of the spi_config is invalid.
  */
 static inline int spi_write_signal(const struct device *dev,
 				  const struct spi_config *config,
@@ -1365,9 +1358,9 @@ extern const struct rtio_iodev_api spi_iodev_api;
  * @param node_id Devicetree node identifier
  * @param operation_ SPI operational mode
  */
-#define SPI_DT_IODEV_DEFINE(name, node_id, operation_, ...)			\
+#define SPI_DT_IODEV_DEFINE(name, node_id, operation_)				\
 	const struct spi_dt_spec _spi_dt_spec_##name =				\
-		SPI_DT_SPEC_GET(node_id, operation_, __VA_ARGS__);		\
+		SPI_DT_SPEC_GET(node_id, operation_);				\
 	RTIO_IODEV_DEFINE(name, &spi_iodev_api, (void *)&_spi_dt_spec_##name)
 
 /**
@@ -1380,8 +1373,8 @@ extern const struct rtio_iodev_api spi_iodev_api;
  * @param inst Devicetree instance number
  * @param operation_ SPI operational mode
  */
-#define SPI_DT_INST_IODEV_DEFINE(name, inst, operation_, ...)			\
-	SPI_DT_IODEV_DEFINE(name, DT_DRV_INST(inst), operation_, __VA_ARGS__)
+#define SPI_DT_INST_IODEV_DEFINE(name, inst, operation_)			\
+	SPI_DT_IODEV_DEFINE(name, DT_DRV_INST(inst), operation_)
 
 /**
  * @brief Validate that SPI bus (and CS gpio if defined) is ready.
@@ -1418,8 +1411,7 @@ static inline bool spi_is_ready_iodev(const struct rtio_iodev *spi_iodev)
  * @param dev Pointer to the device structure for the driver instance
  * @param config Pointer to a valid spi_config structure instance.
  *
- * @retval 0 If successful.
- * @retval -errno Negative errno code on failure.
+ * @return 0 on success, negative errno value on failure.
  */
 __syscall int spi_release(const struct device *dev,
 			  const struct spi_config *config);
